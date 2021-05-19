@@ -26,6 +26,7 @@ import ca.uhn.fhir.jpa.bulk.export.job.BulkExportJobConfig;
 import ca.uhn.fhir.jpa.bulk.imprt.model.JobFileRowProcessingModeEnum;
 import ca.uhn.fhir.jpa.bulk.imprt.model.ParsedBulkImportRecord;
 import ca.uhn.fhir.jpa.partition.SystemRequestDetails;
+import ca.uhn.fhir.util.StopWatch;
 import org.hl7.fhir.instance.model.api.IBaseResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,7 +51,14 @@ public class BulkImportFileWriter implements ItemWriter<ParsedBulkImportRecord> 
 	@SuppressWarnings({"SwitchStatementWithTooFewBranches", "rawtypes", "unchecked"})
 	@Override
 	public void write(List<? extends ParsedBulkImportRecord> theItemLists) throws Exception {
-		ourLog.info("Beginning bulk import write {} chunks Job[{}] FileIndex[{}]", theItemLists.size(), myJobUuid, myFileIndex);
+
+		String offsets = "unknown";
+		if (theItemLists.size() > 0) {
+			offsets = theItemLists.get(0).getLineIndex() + " - " + theItemLists.get(theItemLists.size()-1).getLineIndex();
+		}
+
+		ourLog.info("Beginning bulk import write {} rows Job[{}] FileIndex[{}] Offset[{}]", theItemLists.size(), myJobUuid, myFileIndex, offsets);
+		StopWatch sw = new StopWatch();
 
 		for (ParsedBulkImportRecord nextItem : theItemLists) {
 
@@ -69,6 +77,7 @@ public class BulkImportFileWriter implements ItemWriter<ParsedBulkImportRecord> 
 
 		}
 
+		ourLog.info("Completed bulk import write {} rows Job[{}] FileIndex[{}] Offset[{}] in {}", theItemLists.size(), myJobUuid, myFileIndex, offsets, sw);
 	}
 
 }
