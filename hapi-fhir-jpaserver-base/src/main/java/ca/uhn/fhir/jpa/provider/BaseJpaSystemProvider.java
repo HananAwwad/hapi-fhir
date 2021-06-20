@@ -27,12 +27,14 @@ import ca.uhn.fhir.jpa.model.util.JpaConstants;
 import ca.uhn.fhir.jpa.search.reindex.IResourceReindexingSvc;
 import ca.uhn.fhir.rest.annotation.At;
 import ca.uhn.fhir.rest.annotation.History;
+import ca.uhn.fhir.rest.annotation.Offset;
 import ca.uhn.fhir.rest.annotation.Operation;
 import ca.uhn.fhir.rest.annotation.OperationParam;
 import ca.uhn.fhir.rest.annotation.Since;
 import ca.uhn.fhir.rest.api.server.IBundleProvider;
 import ca.uhn.fhir.rest.api.server.RequestDetails;
 import ca.uhn.fhir.rest.param.DateRangeParam;
+import ca.uhn.fhir.rest.server.provider.ProviderConstants;
 import org.hl7.fhir.instance.model.api.IBaseParameters;
 import org.hl7.fhir.instance.model.api.IPrimitiveType;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,14 +60,14 @@ public class BaseJpaSystemProvider<T, MT> extends BaseJpaProvider implements IJp
 		return myResourceReindexingSvc;
 	}
 
-	@Operation(name = JpaConstants.OPERATION_EXPUNGE, idempotent = false, returnParameters = {
+	@Operation(name = ProviderConstants.OPERATION_EXPUNGE, idempotent = false, returnParameters = {
 		@OperationParam(name = JpaConstants.OPERATION_EXPUNGE_OUT_PARAM_EXPUNGE_COUNT, typeName = "integer")
 	})
 	public IBaseParameters expunge(
-		@OperationParam(name = JpaConstants.OPERATION_EXPUNGE_PARAM_LIMIT, typeName = "integer") IPrimitiveType<Integer> theLimit,
-		@OperationParam(name = JpaConstants.OPERATION_EXPUNGE_PARAM_EXPUNGE_DELETED_RESOURCES, typeName = "boolean") IPrimitiveType<Boolean> theExpungeDeletedResources,
-		@OperationParam(name = JpaConstants.OPERATION_EXPUNGE_PARAM_EXPUNGE_PREVIOUS_VERSIONS, typeName = "boolean") IPrimitiveType<Boolean> theExpungeOldVersions,
-		@OperationParam(name = JpaConstants.OPERATION_EXPUNGE_PARAM_EXPUNGE_EVERYTHING, typeName = "boolean") IPrimitiveType<Boolean> theExpungeEverything,
+		@OperationParam(name = ProviderConstants.OPERATION_EXPUNGE_PARAM_LIMIT, typeName = "integer") IPrimitiveType<Integer> theLimit,
+		@OperationParam(name = ProviderConstants.OPERATION_EXPUNGE_PARAM_EXPUNGE_DELETED_RESOURCES, typeName = "boolean") IPrimitiveType<Boolean> theExpungeDeletedResources,
+		@OperationParam(name = ProviderConstants.OPERATION_EXPUNGE_PARAM_EXPUNGE_PREVIOUS_VERSIONS, typeName = "boolean") IPrimitiveType<Boolean> theExpungeOldVersions,
+		@OperationParam(name = ProviderConstants.OPERATION_EXPUNGE_PARAM_EXPUNGE_EVERYTHING, typeName = "boolean") IPrimitiveType<Boolean> theExpungeEverything,
 		RequestDetails theRequestDetails
 	) {
 		ExpungeOptions options = createExpungeOptions(theLimit, theExpungeDeletedResources, theExpungeOldVersions, theExpungeEverything);
@@ -89,11 +91,16 @@ public class BaseJpaSystemProvider<T, MT> extends BaseJpaProvider implements IJp
 	}
 
 	@History
-	public IBundleProvider historyServer(HttpServletRequest theRequest, @Since Date theDate, @At DateRangeParam theAt, RequestDetails theRequestDetails) {
+	public IBundleProvider historyServer(
+		HttpServletRequest theRequest,
+		@Offset Integer theOffset,
+		@Since Date theDate,
+		@At DateRangeParam theAt,
+		RequestDetails theRequestDetails) {
 		startRequest(theRequest);
 		try {
 			DateRangeParam range = super.processSinceOrAt(theDate, theAt);
-			return myDao.history(range.getLowerBoundAsInstant(), range.getUpperBoundAsInstant(), theRequestDetails);
+			return myDao.history(range.getLowerBoundAsInstant(), range.getUpperBoundAsInstant(), theOffset, theRequestDetails);
 		} finally {
 			endRequest(theRequest);
 		}
