@@ -1,9 +1,53 @@
 package ca.uhn.fhir.jpa.term;
 
+import ca.uhn.fhir.context.FhirContext;
+import ca.uhn.fhir.context.FhirVersionEnum;
+import ca.uhn.fhir.jpa.entity.TermCodeSystemVersion;
+import ca.uhn.fhir.jpa.entity.TermConcept;
+import ca.uhn.fhir.jpa.entity.TermConceptDesignation;
+import ca.uhn.fhir.jpa.entity.TermConceptProperty;
+import ca.uhn.fhir.jpa.model.util.JpaConstants;
+import ca.uhn.fhir.jpa.term.api.ITermCodeSystemStorageSvc;
+import ca.uhn.fhir.jpa.term.api.ITermDeferredStorageSvc;
+import ca.uhn.fhir.jpa.term.api.ITermLoaderSvc;
+import ca.uhn.fhir.jpa.term.loinc.LoincDocumentOntologyHandler;
+import ca.uhn.fhir.jpa.term.loinc.LoincIeeeMedicalDeviceCodeHandler;
+import ca.uhn.fhir.jpa.term.loinc.LoincImagingDocumentCodeHandler;
+import ca.uhn.fhir.jpa.term.loinc.LoincPartRelatedCodeMappingHandler;
+import ca.uhn.fhir.jpa.term.loinc.LoincRsnaPlaybookHandler;
+import ca.uhn.fhir.jpa.term.loinc.LoincTop2000LabResultsSiHandler;
+import ca.uhn.fhir.jpa.term.loinc.LoincTop2000LabResultsUsHandler;
+import ca.uhn.fhir.jpa.term.loinc.LoincUniversalOrderSetHandler;
+import ca.uhn.fhir.rest.api.server.RequestDetails;
+import ca.uhn.fhir.rest.server.exceptions.InvalidRequestException;
+import ca.uhn.fhir.rest.server.exceptions.UnprocessableEntityException;
+import ca.uhn.fhir.rest.server.servlet.ServletRequestDetails;
+import org.hl7.fhir.r4.model.CodeSystem;
+import org.hl7.fhir.r4.model.ConceptMap;
+import org.hl7.fhir.r4.model.Enumerations;
+import org.hl7.fhir.r4.model.ValueSet;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
+import org.mockito.Mock;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+
+import static ca.uhn.fhir.jpa.term.api.ITermCodeSystemStorageSvc.MAKE_LOADING_VERSION_CURRENT;
 import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_ANSWERLIST_DUPLICATE_FILE_DEFAULT;
 import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_ANSWERLIST_FILE_DEFAULT;
 import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_ANSWERLIST_LINK_DUPLICATE_FILE_DEFAULT;
 import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_ANSWERLIST_LINK_FILE_DEFAULT;
+import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_CODESYSTEM_MAKE_CURRENT;
+import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_CODESYSTEM_VERSION;
 import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_CONSUMER_NAME_FILE_DEFAULT;
 import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_DOCUMENT_ONTOLOGY_FILE_DEFAULT;
 import static ca.uhn.fhir.jpa.term.loinc.LoincUploadPropertiesEnum.LOINC_DUPLICATE_FILE_DEFAULT;
@@ -30,48 +74,18 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Map;
-
-import org.hl7.fhir.r4.model.CodeSystem;
-import org.hl7.fhir.r4.model.ConceptMap;
-import org.hl7.fhir.r4.model.Enumerations;
-import org.hl7.fhir.r4.model.ValueSet;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
-import org.mockito.Mock;
-
-import ca.uhn.fhir.context.FhirContext;
-import ca.uhn.fhir.context.FhirVersionEnum;
-import ca.uhn.fhir.jpa.entity.TermConcept;
-import ca.uhn.fhir.jpa.entity.TermConceptDesignation;
-import ca.uhn.fhir.jpa.entity.TermConceptProperty;
-import ca.uhn.fhir.jpa.term.api.ITermCodeSystemStorageSvc;
-import ca.uhn.fhir.jpa.term.api.ITermDeferredStorageSvc;
-import ca.uhn.fhir.jpa.term.api.ITermLoaderSvc;
-import ca.uhn.fhir.jpa.term.loinc.LoincDocumentOntologyHandler;
-import ca.uhn.fhir.jpa.term.loinc.LoincIeeeMedicalDeviceCodeHandler;
-import ca.uhn.fhir.jpa.term.loinc.LoincImagingDocumentCodeHandler;
-import ca.uhn.fhir.jpa.term.loinc.LoincPartRelatedCodeMappingHandler;
-import ca.uhn.fhir.jpa.term.loinc.LoincRsnaPlaybookHandler;
-import ca.uhn.fhir.jpa.term.loinc.LoincTop2000LabResultsSiHandler;
-import ca.uhn.fhir.jpa.term.loinc.LoincTop2000LabResultsUsHandler;
-import ca.uhn.fhir.jpa.term.loinc.LoincUniversalOrderSetHandler;
-import ca.uhn.fhir.rest.api.server.RequestDetails;
-import ca.uhn.fhir.rest.server.exceptions.UnprocessableEntityException;
 
 public class TerminologyLoaderSvcLoincTest extends BaseLoaderTest {
 	private static final org.slf4j.Logger ourLog = org.slf4j.LoggerFactory.getLogger(TerminologyLoaderSvcLoincTest.class);
@@ -99,6 +113,8 @@ public class TerminologyLoaderSvcLoincTest extends BaseLoaderTest {
 	private ArgumentCaptor<List<ConceptMap>> myConceptMapCaptor_267_second;
 	@Captor
 	private ArgumentCaptor<List<ConceptMap>> myConceptMapCaptor_268;
+	@Captor
+	private ArgumentCaptor<RequestDetails> myRequestDetailsCaptor;
 	private ZipCollectionBuilder myFiles;
 	@Mock
 	private ITermDeferredStorageSvc myTermDeferredStorageSvc;
@@ -169,7 +185,7 @@ public class TerminologyLoaderSvcLoincTest extends BaseLoaderTest {
 		verifyLoadLoinc(false, true);
 	}
 
-	
+
 	private void verifyLoadLoinc() {
 		verifyLoadLoinc(true, false);
 	}
@@ -458,22 +474,22 @@ public class TerminologyLoaderSvcLoincTest extends BaseLoaderTest {
 		assertEquals(2, vs.getCompose().getInclude().get(0).getConcept().size());
 		assertEquals("17424-3", vs.getCompose().getInclude().get(0).getConcept().get(0).getCode());
 		assertEquals("13006-2", vs.getCompose().getInclude().get(0).getConcept().get(1).getCode());
-		
+
 		// Consumer Name
 		if (theIncludeConsumerNameAndLinguisticVariants) {
 		    code = concepts.get("61438-8");
-		    assertEquals(28, code.getDesignations().size());
+		    assertEquals(8, code.getDesignations().size());
 		    verifyConsumerName(code.getDesignations(), "Consumer Name 61438-8");
 		    verifyLinguisticVariant(code.getDesignations(), "de-AT", "Entlassungsbrief Ärztlich","Ergebnis","Zeitpunkt","{Setting}","Dokument","Dermatologie","DOC.ONTOLOGY","de shortname","de long common name","de related names 2","de linguistic variant display name");
 		    verifyLinguisticVariant(code.getDesignations(), "fr-CA", "Cellules de Purkinje cytoplasmique type 2 , IgG","Titre","Temps ponctuel","Sérum","Quantitatif","Immunofluorescence","Sérologie","","","","");
 		    verifyLinguisticVariant(code.getDesignations(), "zh-CN", "血流速度.收缩期.最大值","速度","时间点","大脑中动脉","定量型","超声.多普勒","产科学检查与测量指标.超声","","", "Cereb 动态 可用数量表示的;定量性;数值型;数量型;连续数值型标尺 大脑（Cerebral） 时刻;随机;随意;瞬间 术语\"cerebral\"指的是主要由中枢半球（大脑皮质和基底神经节）组成的那部分脑结构 流 流量;流速;流体 血;全血 血流量;血液流量 速度(距离/时间);速率;速率(距离/时间)","");
 		    code = concepts.get("17787-3");
-		    assertEquals(19, code.getDesignations().size());
+		    assertEquals(6, code.getDesignations().size());
 		    verifyConsumerName(code.getDesignations(), "Consumer Name 17787-3");
 		    verifyLinguisticVariant(code.getDesignations(), "de-AT", "","","","","","","","","","CoV OC43 RNA ql/SM P","Coronavirus OC43 RNA ql. /Sondermaterial PCR");
 		    verifyLinguisticVariant(code.getDesignations(), "fr-CA", "Virus respiratoire syncytial bovin","Présence-Seuil","Temps ponctuel","XXX","Ordinal","Culture spécifique à un microorganisme","Microbiologie","","","","");
 		    verifyLinguisticVariant(code.getDesignations(), "zh-CN", "血流速度.收缩期.最大值","速度","时间点","二尖瓣^胎儿","定量型","超声.多普勒","产科学检查与测量指标.超声","","","僧帽瓣 动态 可用数量表示的;定量性;数值型;数量型;连续数值型标尺 时刻;随机;随意;瞬间 流 流量;流速;流体 胎;超系统 - 胎儿 血;全血 血流量;血液流量 速度(距离/时间);速率;速率(距离/时间)","");
-		}	
+		}
 	}
 
 	@Test
@@ -671,7 +687,7 @@ public class TerminologyLoaderSvcLoincTest extends BaseLoaderTest {
 		theFiles.addFileZip("/loinc/", LOINC_LINGUISTIC_VARIANTS_PATH_DEFAULT.getCode() + "frCA8LinguisticVariant.csv");
 	}
 
-	
+
 	public static void addLoincMandatoryFilesToZip(ZipCollectionBuilder theFiles) throws IOException {
 		addBaseLoincMandatoryFilesToZip(theFiles, true);
 		theFiles.addFileZip("/loinc/", LOINC_UPLOAD_PROPERTIES_FILE.getCode());
@@ -717,7 +733,7 @@ public class TerminologyLoaderSvcLoincTest extends BaseLoaderTest {
 			theFiles.addFileZip("/loinc/", LOINC_TOP2000_COMMON_LAB_RESULTS_SI_FILE_DEFAULT.getCode());
 			theFiles.addFileZip("/loinc/", LOINC_TOP2000_COMMON_LAB_RESULTS_US_FILE_DEFAULT.getCode());
 		}
-		
+
 	}
 
 	@Test
@@ -822,6 +838,110 @@ public class TerminologyLoaderSvcLoincTest extends BaseLoaderTest {
 		assertEquals("LP52960-9", doublyNestedChildCode.getChildren().get(2).getChild().getCode());
 	}
 
+
+
+
+	@Nested
+	public class LoadLoincCurrentVersion {
+		private TermLoaderSvcImpl testedSvc;
+		private final Properties testProps = new Properties();
+
+		@Mock private final LoadedFileDescriptors mockFileDescriptors = mock(LoadedFileDescriptors.class);
+		@SuppressWarnings("unchecked")
+		@Mock private final List<ITermLoaderSvc.FileDescriptor> mockFileDescriptorList = mock(List.class);
+		@Mock private final ITermCodeSystemStorageSvc mockCodeSystemStorageSvc = mock(ITermCodeSystemStorageSvc.class);
+		private final RequestDetails requestDetails = new ServletRequestDetails();
+
+
+		@BeforeEach
+		void beforeEach() {
+			testedSvc = spy(mySvc);
+			doReturn(testProps).when(testedSvc).getProperties(any(), eq(LOINC_UPLOAD_PROPERTIES_FILE.getCode()));
+			requestDetails.setOperation(JpaConstants.OPERATION_UPLOAD_EXTERNAL_CODE_SYSTEM);
+		}
+
+
+		@Test
+		public void testDontMakeCurrentVersion() throws IOException {
+			addLoincMandatoryFilesToZip(myFiles);
+			testProps.put(LOINC_CODESYSTEM_MAKE_CURRENT.getCode(), "false");
+			testProps.put(LOINC_CODESYSTEM_VERSION.getCode(), "27.0");
+
+			testedSvc.loadLoinc(myFiles.getFiles(), requestDetails);
+
+			verify(myTermCodeSystemStorageSvc, times(1)).storeNewCodeSystemVersion(
+				any(CodeSystem.class), any(TermCodeSystemVersion.class), myRequestDetailsCaptor.capture(), any(), any());
+
+			myRequestDetailsCaptor.getAllValues().forEach( rd ->
+				assertFalse(rd.getUserData() == null ||
+					(boolean) requestDetails.getUserData().getOrDefault(MAKE_LOADING_VERSION_CURRENT, Boolean.TRUE))
+			);
+		}
+
+
+		@Test
+		public void testMakeCurrentVersionPropertySet() {
+			testProps.put(LOINC_CODESYSTEM_MAKE_CURRENT.getCode(), "true");
+			testProps.put(LOINC_CODESYSTEM_VERSION.getCode(), "27.0");
+			doReturn(mockFileDescriptors).when(testedSvc).getLoadedFileDescriptors(mockFileDescriptorList);
+			doReturn(mock(UploadStatistics.class)).when(testedSvc).processLoincFiles(
+				eq(mockFileDescriptors), eq(requestDetails), eq(testProps), any());
+
+			testedSvc.loadLoinc(mockFileDescriptorList, requestDetails);
+
+			boolean isMakeCurrent = requestDetails.getUserData() == null ||
+				(boolean) requestDetails.getUserData().getOrDefault(MAKE_LOADING_VERSION_CURRENT, Boolean.TRUE);
+			assertTrue(isMakeCurrent);
+		}
+
+
+		@Test
+		public void testMakeCurrentVersionByDefaultPropertySet() {
+			testProps.put(LOINC_CODESYSTEM_VERSION.getCode(), "27.0");
+			doReturn(mockFileDescriptors).when(testedSvc).getLoadedFileDescriptors(mockFileDescriptorList);
+			doReturn(mock(UploadStatistics.class)).when(testedSvc).processLoincFiles(
+				eq(mockFileDescriptors), eq(requestDetails), eq(testProps), any());
+
+			testedSvc.loadLoinc(mockFileDescriptorList, requestDetails);
+
+			boolean isMakeCurrent = requestDetails.getUserData() == null ||
+				(boolean) requestDetails.getUserData().getOrDefault(MAKE_LOADING_VERSION_CURRENT, Boolean.TRUE);
+			assertTrue(isMakeCurrent);
+		}
+
+
+		@Test
+		public void testDontMakeCurrentVersionPropertySet() {
+			testProps.put(LOINC_CODESYSTEM_MAKE_CURRENT.getCode(), "false");
+			testProps.put(LOINC_CODESYSTEM_VERSION.getCode(), "27.0");
+			doReturn(mockFileDescriptors).when(testedSvc).getLoadedFileDescriptors(mockFileDescriptorList);
+			doReturn(mock(UploadStatistics.class)).when(testedSvc).processLoincFiles(
+				eq(mockFileDescriptors), eq(requestDetails), eq(testProps), any());
+
+			testedSvc.loadLoinc(mockFileDescriptorList, requestDetails);
+
+			boolean isMakeCurrent = requestDetails.getUserData() == null ||
+				(boolean) requestDetails.getUserData().getOrDefault(MAKE_LOADING_VERSION_CURRENT, Boolean.TRUE);
+			assertFalse(isMakeCurrent);
+		}
+
+
+		@Test
+		public void testNoVersionAndNoMakeCurrentThrows() {
+			testProps.put(LOINC_CODESYSTEM_MAKE_CURRENT.getCode(), "false");
+			doReturn(mockFileDescriptors).when(testedSvc).getLoadedFileDescriptors(mockFileDescriptorList);
+
+			InvalidRequestException thrown = Assertions.assertThrows(InvalidRequestException.class,
+				() -> testedSvc.loadLoinc(mockFileDescriptorList, mySrd) );
+
+			assertEquals("'" + LOINC_CODESYSTEM_VERSION.getCode() + "' property is required when '" +
+				LOINC_CODESYSTEM_MAKE_CURRENT.getCode() + "' property is 'false'", thrown.getMessage());
+		}
+
+	}
+
+
+
 	private static void verifyConsumerName(Collection<TermConceptDesignation> designationList, String theConsumerName) {
 	    
 	    TermConceptDesignation consumerNameDesignation = null;
@@ -838,61 +958,29 @@ public class TerminologyLoaderSvcLoincTest extends BaseLoaderTest {
 			String methodType, String theClass, String theShortName, String theLongCommonName, String theRelatedName2,
 			String theLinguisticVariantDisplayName) {
 
-		TermConceptDesignation componentDes = null;
-		TermConceptDesignation propertyDes = null;
-		TermConceptDesignation timeAspctDes = null;
-		TermConceptDesignation systemDes = null;
-		TermConceptDesignation scaleTypDes = null;
-
-		TermConceptDesignation methodTypDes = null;
-		TermConceptDesignation classDes = null;
+		TermConceptDesignation formalNameDes = null;
 		TermConceptDesignation shortNameDes = null;
-		TermConceptDesignation longCommonNameDes = null;
-		TermConceptDesignation relatedNames2Des = null;
-		
+		TermConceptDesignation longCommonNameDes = null;	
 		TermConceptDesignation linguisticVariantDisplayNameDes = null;
 		
 		for (TermConceptDesignation designation : designationList) {
 			if (theLanguage.equals(designation.getLanguage())) {
 				
-				if ("COMPONENT".equals(designation.getUseDisplay())) 
-					componentDes = designation;
-				if ("PROPERTY".equals(designation.getUseDisplay())) 
-					propertyDes = designation;
-				if ("TIME_ASPCT".equals(designation.getUseDisplay())) 
-					timeAspctDes = designation;
-				if ("SYSTEM".equals(designation.getUseDisplay())) 
-					systemDes = designation;
-				if ("SCALE_TYP".equals(designation.getUseDisplay())) 
-					scaleTypDes = designation;
+				if ("FullySpecifiedName".equals(designation.getUseDisplay())) 
+					formalNameDes = designation;
 				
-				if ("METHOD_TYP".equals(designation.getUseDisplay())) 
-					methodTypDes = designation;
-				if ("CLASS".equals(designation.getUseDisplay())) 
-					classDes = designation;
 				if ("SHORTNAME".equals(designation.getUseDisplay())) 
 					shortNameDes = designation;
 				if ("LONG_COMMON_NAME".equals(designation.getUseDisplay())) 
 					longCommonNameDes = designation;
-				if ("RELATEDNAMES2".equals(designation.getUseDisplay())) 
-					relatedNames2Des = designation;
-				
 				if ("LinguisticVariantDisplayName".equals(designation.getUseDisplay())) 
 					linguisticVariantDisplayNameDes = designation;
 			}
 		}
-		verifyDesignation(componentDes, ITermLoaderSvc.LOINC_URI, "COMPONENT", theComponent);
-		verifyDesignation(propertyDes, ITermLoaderSvc.LOINC_URI, "PROPERTY", theProperty);
-		verifyDesignation(timeAspctDes, ITermLoaderSvc.LOINC_URI, "TIME_ASPCT", theTimeAspct);
-		verifyDesignation(systemDes, ITermLoaderSvc.LOINC_URI, "SYSTEM", theSystem);
-		verifyDesignation(scaleTypDes, ITermLoaderSvc.LOINC_URI, "SCALE_TYP", theScaleTyp);
 		
-		verifyDesignation(methodTypDes, ITermLoaderSvc.LOINC_URI, "METHOD_TYP", methodType);
-		verifyDesignation(classDes, ITermLoaderSvc.LOINC_URI, "CLASS", theClass);
+		verifyDesignation(formalNameDes, ITermLoaderSvc.LOINC_URI, "FullySpecifiedName", theComponent+":"+theProperty+":"+theTimeAspct+":"+theSystem+":"+theScaleTyp+":"+methodType);
 		verifyDesignation(shortNameDes, ITermLoaderSvc.LOINC_URI, "SHORTNAME", theShortName);
-		verifyDesignation(longCommonNameDes, ITermLoaderSvc.LOINC_URI, "LONG_COMMON_NAME", theLongCommonName);
-		verifyDesignation(relatedNames2Des, ITermLoaderSvc.LOINC_URI, "RELATEDNAMES2", theRelatedName2);
-		
+		verifyDesignation(longCommonNameDes, ITermLoaderSvc.LOINC_URI, "LONG_COMMON_NAME", theLongCommonName);		
 		verifyDesignation(linguisticVariantDisplayNameDes, ITermLoaderSvc.LOINC_URI, "LinguisticVariantDisplayName", theLinguisticVariantDisplayName);
 	}
 	
