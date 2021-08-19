@@ -267,10 +267,17 @@ public class OpenApiInterceptor {
 		return false;
 	}
 
+	public String removeTrailingSlash(String theUrl) {
+		while(theUrl != null && theUrl.endsWith("/")) {
+			theUrl = theUrl.substring(0, theUrl.length() - 1);
+		}
+		return theUrl;
+	}
+
 	@SuppressWarnings("unchecked")
 	private void serveSwaggerUiHtml(ServletRequestDetails theRequestDetails, HttpServletResponse theResponse) throws IOException {
 		CapabilityStatement cs = getCapabilityStatement(theRequestDetails);
-
+		String baseUrl = removeTrailingSlash(cs.getImplementation().getUrl());
 		theResponse.setStatus(200);
 		theResponse.setContentType(Constants.CT_HTML);
 
@@ -283,7 +290,7 @@ public class OpenApiInterceptor {
 		context.setVariable("SERVER_VERSION", cs.getSoftware().getVersion());
 		context.setVariable("BASE_URL", cs.getImplementation().getUrl());
 		context.setVariable("BANNER_IMAGE_URL", getBannerImage());
-		context.setVariable("OPENAPI_DOCS", cs.getImplementation().getUrl() + "/api-docs");
+		context.setVariable("OPENAPI_DOCS", baseUrl + "/api-docs");
 		context.setVariable("FHIR_VERSION", cs.getFhirVersion().toCode());
 		context.setVariable("FHIR_VERSION_CODENAME", FhirVersionEnum.forVersionString(cs.getFhirVersion().toCode()).name());
 
@@ -509,7 +516,7 @@ public class OpenApiInterceptor {
 				Operation operation = getPathItem(paths, "/" + resourceType, PathItem.HttpMethod.GET);
 				operation.addTagsItem(resourceType);
 				operation.setDescription("This is a search type");
-				operation.setSummary("search-type: Update an existing " + resourceType + " instance, or create using a client-assigned ID");
+				operation.setSummary("search-type: Search for " + resourceType + " instances");
 				addFhirResourceResponse(ctx, openApi, operation, null);
 
 				for (CapabilityStatement.CapabilityStatementRestResourceSearchParamComponent nextSearchParam : nextResource.getSearchParam()) {
